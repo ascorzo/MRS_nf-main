@@ -1,0 +1,439 @@
+#!/bin/tcsh -f
+# ====================================================================================== #
+# Filename: ima_mrs2raw_hdr
+# Updated: 2013.12.04 (HW)
+# Created: 2013.11.20 (HW)
+#
+# Function: Convert Siemens specific IMA files to LCModel compatible ascii files along
+# with corresponding rda compliant header file.  Will overwrite existing files.
+#
+# Usage: ima_mrs2rda_hdr -in in_file -out out_file
+#
+# Parent script(s):
+# 	script_name: function
+# Dependent script(s):
+# 	gdcmdump: binary executable (not a script) for pulling Siemens specific CSA headers
+#	dicom_get_spectrum_siemens.m: matlab script for extracting raw MRS data
+#
+# Inputs: in_file[.ima] (dicom)
+# Output: out_file.rda_hdr, out_file.raw
+#
+# See also: recode_ima
+# ====================================================================================== #
+
+set debug = "off"			# Set to "off" if not using debug
+
+# ====================================================================================== #
+# Global variable declarations
+
+# Directory and path initialization
+set program   	= $0:t
+set cur_dir		= `pwd`
+
+set project		= `pwd | rev | awk -F \/ '{ print $1}' | rev`
+set site		= `pwd | rev | awk -F \/ '{ print $2}' | rev`
+
+set opt_bin 		= "/home/bmi/Documents/MRS/Scripts"
+set par_config_file 	= "${opt_bin}/par_config_file"
+set machine         	= `echo $HOST | cut -d. -f1`
+
+# Get info from par_config_file
+set matlab					= `awk '/global\tmatlab_cmd/ {print $3}' $par_config_file | sed 's/_/\ /g'`
+set matlab_script_path	= `awk '/'$machine'\tmatlab_script_path/ {print $3}' $par_config_file`
+
+
+# Common elements (file extensions)
+set txt_ext		= "txt"
+set rda_hdr_ext		= "rda_hdr"
+set raw_ext		= "raw"
+set gdcm_ext		= "gdcm"
+
+
+
+# Script default values
+unset out_str
+# Script dependencies
+set get_siemens_dicom	= `awk '/'$machine'\tget_txt_siemens_dicom/ {print $3}' $par_config_file`		# Matlab function
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug: ${program}"
+	echo ${argv[*]}
+	echo "### End Debug: ${program}"
+	echo ""
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+# ====================================================================================== #
+# Initialization & error checking
+
+
+if ( ($#argv == 2) || ($#argv == 4)) then
+	while ($#argv)
+		switch ($argv[1])
+			case -in:
+				shift
+				set in_str = $argv[1]
+				breaksw
+			case -out:
+				shift
+				set out_str = $argv[1]
+				breaksw
+			default:
+				goto HELP_USAGE
+				breaksw
+		endsw
+		shift
+	end
+else
+	HELP_USAGE:
+	echo ""
+	echo "Usage:   ${program} -in input_filename [-out output_filename]"
+	echo ""
+	echo "	Required:"
+	echo "	-in	Input ima file name"
+	echo ""
+	echo "	Optional:"
+	echo "	-out	Specify output file name.  (Default: same as input filename)"
+	echo ""
+	echo "	e.g. type: $program -in peanut -out peanut_brittle"
+	echo ""
+	echo '	>	"peanut" is a Siemens specific dicom file (i.e. peanut.ima)'
+	echo '	>	"peanut_brittle" generates peanut_brittle.rda_hdr and peanut_brittle.raw'
+	echo ""
+	exit
+endif
+
+set folder = `dirname "${in_str:r}"`
+
+if (${?out_str} == 0 ) set out_str = ${in_str:r}
+set out_hdrfile = "${out_str}.${rda_hdr_ext}"
+set out_txtfile = "${out_str}.${txt_ext}"
+set out_rawfile = "${out_str}.${raw_ext}"
+
+if ( -f "$in_str" ) then
+	set in_file = `echo $in_str | sed 's/\.\///'`	# Case insensitive filename match
+else
+	echo "[${program} - ERROR] - No matching files found"
+	exit
+endif
+if (${#in_file} > 1) then
+	echo "[${program} - ERROR] More than one matching file found. More specificity needed."
+	echo "	Found files: ${in_file}"
+	exit
+elseif (${#in_file} < 1) then
+	echo "[${program} - ERROR] No matching files found."
+	exit
+endif
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug: ${program}"
+	echo "in_str = $in_str"
+	echo "out_str = $out_str"
+	echo "in_file = $in_file"
+	echo "out_hdrfile = ${out_hdrfile}"
+	echo "out_rawfile = ${out_rawfile}"
+	echo "### End Debug: ${program}"
+	echo ""
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+# ====================================================================================== #
+# Extracting information
+echo "[${program}]: Extracting information from ${in_file:t}"
+
+set gdcm_file 	= "${in_file:r}.${gdcm_ext}"
+gdcmdump -C ${in_file} | cat > "${gdcm_file}"
+
+set pt_name	= `dcmdump +P "0010,0010" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set pt_id	= `dcmdump +P "0010,0020" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set pt_sex	= `dcmdump +P "0010,0040" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set pt_dob	= `dcmdump +P "0010,0030" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set pt_age	= `dcmdump +P "0010,1010" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set pt_wt	= `dcmdump +P "0010,1030" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set pt_pos	= `dcmdump +P "0018,5100" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+
+set study_date	= `dcmdump +P "0008,0020" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set study_time	= `dcmdump +P "0008,0030" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set study_desc	= `dcmdump +P "0008,1030" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set prot_name	= `dcmdump +P "0018,1030" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ser_date	= `dcmdump +P "0008,0021" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ser_time	= `dcmdump +P "0008,0031" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ser_desc	= `dcmdump +P "0008,103e" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ser_numb	= `dcmdump +P "0020,0011" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ins_date	= `dcmdump +P "0008,0012" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ins_time	= `dcmdump +P "0008,0013" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ins_numb	= `dcmdump +P "0020,0013" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set ins_comm	= `dcmdump +P "0020,4000" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set acq_numb	= `dcmdump +P "0020,0012" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+
+set seq_name	= `awk "/'SequenceName'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g" | sed -e "s/\*//g"`
+set seq_desc	= $seq_name
+
+set tr_time		= `awk "/'RepetitionTime'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set te_time		= `awk "/'EchoTime'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set tm_time		= `awk "/'MixingTime'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set ti_time		= `awk "/'InversionTime'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+
+set dtime		= `awk "/'RealDwellTime'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set dw_time		= `echo "scale = 3; ${dtime} * 10^(-3)" | bc`
+
+set echo_numb	= `awk "/'EchoNumbers'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set num_of_ave	= `awk "/'NumberOfAverages'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set mr_freq		= `awk "/'ImagingFrequency'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set nucleus		= `awk "/'ImagedNucleus'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set field_str	= `awk "/'MagneticFieldStrength'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set pe_steps	= `awk "/'NumberOfPhaseEncodingSteps'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set flip_ang	= `awk "/'FlipAngle'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set vec_size	= `awk "/'DataPointColumns'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+
+set csi_mat_0	= `awk "/'Columns'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set csi_mat_1	= `awk "/'Rows'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set csi_mat_2	= `awk "/'NumberOfFrames'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set csi_acq_0	= `awk "/'SpectroscopyAcquisitionPhaseColumns'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set csi_acq_1	= `awk "/'SpectroscopyAcquisitionPhaseRows'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set csi_acq_2	= `awk "/'SpectroscopyAcquisitionOut-of-planePhaseSteps'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+# set csi_shf_0	= `awk "/'SpectroscopyAcquisitionPhaseColumns'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+# set csi_shf_1	= `awk "/'SpectroscopyAcquisitionPhaseRows'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+# set csi_shf_2	= `awk "/'SpectroscopyAcquisitionOut-of-planePhaseSteps'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set csi_shf_0	= "undefined"
+set csi_shf_1	= "undefined"
+set csi_shf_2	= "undefined"
+set hamming_f	= `awk "/'HammingFilterWidth'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set freq_corr	= `awk "/'FrequencyCorrection'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set trans_coil	= `awk "/'TransmittingCoil'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set tr_ref_amp	= `awk "/'TransmitterReferenceAmplitude'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set sl_thick	= `awk "/'SliceThickness'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set ps_vec_0	= `awk "/'ImagePositionPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f1 |sed -e "s/'//g"`
+set ps_vec_1	= `awk "/'ImagePositionPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f2 |sed -e "s/'//g"`
+set ps_vec_2	= `awk "/'ImagePositionPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f3 |sed -e "s/'//g"`
+set row_vec_0	= `awk "/'ImageOrientationPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f1 |sed -e "s/'//g"`
+set row_vec_1	= `awk "/'ImageOrientationPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f2 |sed -e "s/'//g"`
+set row_vec_2	= `awk "/'ImageOrientationPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f3 |sed -e "s/'//g"`
+set col_vec_0	= `awk "/'ImageOrientationPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f4 |sed -e "s/'//g"`
+set col_vec_1	= `awk "/'ImageOrientationPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f5 |sed -e "s/'//g"`
+set col_vec_2	= `awk "/'ImageOrientationPatient'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f6 |sed -e "s/'//g"`
+set voip_sag	= `awk "/'VoiPosition'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f1 |sed -e "s/'//g"`
+set voip_cor	= `awk "/'VoiPosition'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f2 |sed -e "s/'//g"`
+set voip_tra	= `awk "/'VoiPosition'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f3 |sed -e "s/'//g"`
+set voi_thick	= `awk "/'VoiThickness'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set voi_ph_fov	= `awk "/'VoiPhaseFoV'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set voi_ro_fov	= `awk "/'VoiReadoutFoV'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set voi_nr_sag	= `awk "/'VoiOrientation'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f1 |sed -e "s/'//g"`
+set voi_nr_cor	= `awk "/'VoiOrientation'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f2 |sed -e "s/'//g"`
+set voi_nr_tra	= `awk "/'VoiOrientation'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f3 |sed -e "s/'//g"`
+set voi_in_rot	= `awk "/'VoiInPlaneRotation'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set fov_height	= ${voi_ph_fov}
+set fov_width	= ${voi_ro_fov}
+set fov_3d		= ${voi_thick}
+set prct_fov	= `awk "/'PercentPhaseFieldOfView'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set numb_row	= `awk "/'Rows'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set numb_col	= `awk "/'Columns'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set numb_3d		= `awk "/'NumberOfFrames'/ {print}" ${gdcm_file} | cut -d' ' -f13 | sed -e "s/'//g"`
+set px_sp_row	= `awk "/'PixelSpacing'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f1 | sed -e "s/'//g"`
+set px_sp_col	= `awk "/'PixelSpacing'/ {print}" ${gdcm_file} | cut -d' ' -f13 | cut -d\\ -f2 | sed -e "s/'//g"`
+set px_sp_3d	= ${sl_thick}
+
+set inst_name	= `dcmdump +P "0008,0080" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g' | cut -c1-33`
+set stat_name	= `dcmdump +P "0008,1010" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set model_name	= `dcmdump +P "0008,1090" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set dev_serial	= `dcmdump +P "0018,1000" ${in_file} | awk '{print $3}' | sed 's/.*\[\([^]]*\)\].*/\1/g'`
+set soft_ver	= `dcmdump +P "0018,1020" ${in_file} | sed 's/.*\[\([^]]*\)\].*/\1/g'`		# Siemens specific (likely)
+
+# ====================================================================================== #
+# Generate *.rda_hdr file
+echo "[${program}]: Writing header information to ${out_hdrfile:t}"
+
+echo ">>> Begin of header <<<" > ${out_hdrfile}
+echo "PatientName: ${pt_name}" >> ${out_hdrfile}
+echo "PatientID: ${pt_id}" >> ${out_hdrfile}
+echo "PatientSex: ${pt_sex}" >> ${out_hdrfile}
+echo "PatientBirthDate: ${pt_dob}" >> ${out_hdrfile}
+echo "StudyDate: ${study_date}" >> ${out_hdrfile}
+echo "StudyTime: ${study_time}" >> ${out_hdrfile}
+echo "StudyDescription: ${study_desc}" >> ${out_hdrfile}
+echo "PatientAge: ${pt_age}" >> ${out_hdrfile}
+echo "PatientWeight: ${pt_wt}" >> ${out_hdrfile}
+echo "SeriesDate: ${ser_date}" >> ${out_hdrfile}
+echo "SeriesTime: ${ser_time}" >> ${out_hdrfile}
+echo "SeriesDescription: ${ser_desc}" >> ${out_hdrfile}
+echo "ProtocolName: ${prot_name}" >> ${out_hdrfile}
+echo "PatientPosition: ${pt_pos}" >> ${out_hdrfile}
+echo "SeriesNumber: ${ser_numb}" >> ${out_hdrfile}
+echo "InstitutionName: ${inst_name}" >> ${out_hdrfile}
+echo "StationName: ${stat_name}" >> ${out_hdrfile}
+echo "ModelName: ${model_name}" >> ${out_hdrfile}
+echo "DeviceSerialNumber: ${dev_serial}" >> ${out_hdrfile}
+echo "SoftwareVersion[0]: ${soft_ver}" >> ${out_hdrfile}
+echo "InstanceDate: ${ins_date}" >> ${out_hdrfile}
+echo "InstanceTime: ${ins_time}" >> ${out_hdrfile}
+echo "InstanceNumber: ${ins_numb}" >> ${out_hdrfile}
+echo "InstanceComments: ${ins_comm}" >> ${out_hdrfile}
+echo "AcquisitionNumber: ${acq_numb}" >> ${out_hdrfile}
+echo "SequenceName: ${seq_name}" >> ${out_hdrfile}
+echo "SequenceDescription: ${seq_desc}" >> ${out_hdrfile}
+echo "TR: ${tr_time}" >> ${out_hdrfile}
+echo "TE: ${te_time}" >> ${out_hdrfile}
+echo "TM: ${tm_time}" >> ${out_hdrfile}
+echo "TI: ${ti_time}" >> ${out_hdrfile}
+echo "DwellTime: ${dw_time}" >> ${out_hdrfile}
+echo "EchoNumber: ${echo_numb}" >> ${out_hdrfile}
+echo "NumberOfAverages: ${num_of_ave}" >> ${out_hdrfile}
+echo "MRFrequency: ${mr_freq}" >> ${out_hdrfile}
+echo "Nucleus: ${nucleus}" >> ${out_hdrfile}
+echo "MagneticFieldStrength: ${field_str}" >> ${out_hdrfile}
+echo "NumOfPhaseEncodingSteps: ${pe_steps}" >> ${out_hdrfile}
+echo "FlipAgle: ${flip_ang}" >> ${out_hdrfile}
+echo "VectorSize: ${vec_size}" >> ${out_hdrfile}
+echo "CSIMatrixSize[0]: ${csi_mat_0}" >> ${out_hdrfile}
+echo "CSIMatrixSize[1]: ${csi_mat_1}" >> ${out_hdrfile}
+echo "CSIMatrixSize[2]: ${csi_mat_2}" >> ${out_hdrfile}
+echo "CSIMatrixSizeOfScan[0]: ${csi_acq_0}" >> ${out_hdrfile}
+echo "CSIMatrixSizeOfScan[1]: ${csi_acq_1}" >> ${out_hdrfile}
+echo "CSIMatrixSizeOfScan[2]: ${csi_acq_2}" >> ${out_hdrfile}
+echo "CSIGridShift[0]: ${csi_shf_0}" >> ${out_hdrfile}
+echo "CSIGridShift[1]: ${csi_shf_1}" >> ${out_hdrfile}
+echo "CSIGridShift[2]: ${csi_shf_2}" >> ${out_hdrfile}
+echo "HammingFilter: ${hamming_f}" >> ${out_hdrfile}
+echo "FrequencyCorrection: ${freq_corr}" >> ${out_hdrfile}
+echo "TransmitCoil: ${trans_coil}" >> ${out_hdrfile}
+echo "TransmitRefAmplitude[${nucleus}]: ${tr_ref_amp}" >> ${out_hdrfile}
+echo "SliceThickness: ${sl_thick}" >> ${out_hdrfile}
+echo "PositionVector[0]: ${ps_vec_0}" >> ${out_hdrfile}
+echo "PositionVector[1]: ${ps_vec_1}" >> ${out_hdrfile}
+echo "PositionVector[2]: ${ps_vec_2}" >> ${out_hdrfile}
+echo "RowVector[0]: ${row_vec_0}" >> ${out_hdrfile}
+echo "RowVector[1]: ${row_vec_1}" >> ${out_hdrfile}
+echo "RowVector[2]: ${row_vec_2}" >> ${out_hdrfile}
+echo "ColumnVector[0]: ${col_vec_0}" >> ${out_hdrfile}
+echo "ColumnVector[1]: ${col_vec_1}" >> ${out_hdrfile}
+echo "ColumnVector[2]: ${col_vec_2}" >> ${out_hdrfile}
+echo "VOIPositionSag: ${voip_sag}" >> ${out_hdrfile}
+echo "VOIPositionCor: ${voip_cor}" >> ${out_hdrfile}
+echo "VOIPositionTra: ${voip_tra}" >> ${out_hdrfile}
+echo "VOIThickness: ${voi_thick}" >> ${out_hdrfile}
+echo "VOIPhaseFOV: ${voi_ph_fov}" >> ${out_hdrfile}
+echo "VOIReadoutFOV: ${voi_ro_fov}" >> ${out_hdrfile}
+echo "VOINormalSag: ${voi_nr_sag}" >> ${out_hdrfile}
+echo "VOINormalCor: ${voi_nr_cor}" >> ${out_hdrfile}
+echo "VOINormalTra: ${voi_nr_tra}" >> ${out_hdrfile}
+echo "VOIRotationInPlane: ${voi_in_rot}" >> ${out_hdrfile}
+echo "FoVHeight: ${fov_height}" >> ${out_hdrfile}
+echo "FoVWidth: ${fov_width}" >> ${out_hdrfile}
+echo "FoV3D: ${voi_thick}" >> ${out_hdrfile}
+echo "PercentOfRectFoV: ${prct_fov}" >> ${out_hdrfile}
+echo "NumberOfRows: ${numb_row}" >> ${out_hdrfile}
+echo "NumberOfColumns: ${numb_col}" >> ${out_hdrfile}
+echo "NumberOf3DParts: ${numb_3d}" >> ${out_hdrfile}
+echo "PixelSpacingRow: ${px_sp_row}" >> ${out_hdrfile}
+echo "PixelSpacingCol: ${px_sp_col}" >> ${out_hdrfile}
+echo "PixelSpacing3D: ${px_sp_3d}" >> ${out_hdrfile}
+echo ">>> End of header <<<" >> ${out_hdrfile}
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug: ${program}"
+	echo "${out_hdrfile}:"
+	cat ${out_hdrfile}
+	echo "### End Debug: ${program}"
+	echo ""
+endif
+# exit
+## DEBUGGER END ##########################################################################
+set folder = `dirname "${in_str:r}"`
+# ====================================================================================== #
+# Generate *.txt file
+
+${matlab} "addpath(genpath('${matlab_script_path}')); ${get_siemens_dicom}('${in_file}', '${out_txtfile}'); exit;"
+
+if ( ! -e ${out_txtfile} ) then
+	echo "[${program}]: ERROR - unable to create ${out_txtfile}"
+	exit
+else
+	echo "[${program}]: FID copied and extracted to ${out_txtfile:t}"
+endif
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug: ${program}"
+	echo "${out_txtfile}:"
+	cat ${out_txtfile}
+	echo "### End Debug: ${program}"
+	echo ""
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+# ====================================================================================== #
+# Generate *.RAW file
+
+switch (${seq_name})
+	case svs_st:
+		set seq_type = "STEAM"
+		breaksw
+	case svs_se:
+		set seq_type = "PRESS"
+		breaksw
+	default:
+		set seq_type = "PRESS"
+		breaksw
+endsw
+
+# Voxel volume calcuation (in units of mL)
+set vox_vol = `echo "${voi_thick} ${voi_ph_fov} ${voi_ro_fov}" | awk '{ vol = $1 * $2 * $3 * 10^(-3); printf("%4.3E", vol)}'`
+
+echo ' $SEQPAR' > ${out_rawfile}
+echo " ECHOT = ${te_time}" >> ${out_rawfile}
+echo " SEQ = '${seq_type}'" >> ${out_rawfile}
+echo " HZPPM = ${mr_freq}" >> ${out_rawfile}
+echo ' $END' >> ${out_rawfile}
+
+echo ' $NMID' >> ${out_rawfile}
+echo " ID = '${pt_id}'" >> ${out_rawfile}
+echo " FMTDAT = '(2E15.6)'" >> ${out_rawfile}
+echo " VOLUME = ${vox_vol}" >> ${out_rawfile}
+echo " TRAMP = 1.0" >> ${out_rawfile}
+echo ' $END' >> ${out_rawfile}
+
+cat ${out_txtfile} >> ${out_rawfile}
+
+echo "[${program}]: LCModel compliant raw file generated - ${out_rawfile:t}"
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug: ${program}"
+	echo "${out_rawfile}:"
+	cat ${out_rawfile}
+	echo "### End Debug: ${program}"
+	echo ""
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+exit
+
+# ###################################################################################### #
+# Footnotes: ########################################################################### #
+# ###################################################################################### #
+#
+# Footnote 01: File naming convention
+# {basename}{time_pt}_{region_code}_{side_code}_{series}{sup_unsup}
+#
+# ###################################################################################### #
+
+# ###################################################################################### #
+# Change Log: ########################################################################## #
+# ###################################################################################### #
+#
+# -------------------------------------------------------------------------------------- #
+# 2013.10.24:
+#
+# ###################################################################################### #

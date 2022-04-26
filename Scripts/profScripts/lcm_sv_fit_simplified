@@ -1,0 +1,60 @@
+#!/bin/tcsh -f
+#=========
+
+
+set program   			= $0
+set program   			= $program:t
+
+# Common elements
+set raw_ext				= "raw"
+set corraw_suf			= "_corraw"
+set text      			= "txt"
+set voxel_ext			= "voxel"
+
+set debug 				= 1
+
+
+#@#
+set opt_bin 			= "/opt/bin"
+
+set par_config_file 	= "${opt_bin}/par_config_file"
+set machine         	= `echo $HOST | cut -d. -f1`
+
+
+
+set voxel_dir       	= `awk '/global\tvoxel_dir/ {print $3}' $par_config_file`
+set AWK             	= `awk '/'${machine}'\tawk_path/ {print $3}' $par_config_file`
+set mrs_dir         	= `awk '/global\tdata_rda_dir/ {print $3}' $par_config_file`
+set lcmodel				= `awk '/global\tlc_bin/ {print $3}' $par_config_file`
+set matlab				= `awk '/'${machine}'\tmatlab_bin/ {print $3}' $par_config_file`
+set matlab_script_path	= `awk '/'${machine}'\tmatlab_script_path/ {print $3}' $par_config_file`
+set par_dir         	= `awk '/global\tpar_dir/ {print $3}' $par_config_file`
+
+set cur_dir         	= `pwd`
+
+  
+##echo $lcmodel
+
+    
+set project     		= `pwd | rev | $AWK -F \/ '{ print $1}' | rev`
+set site            	= `pwd | rev | $AWK -F \/ '{ print $2}' | rev`
+
+
+
+
+
+
+###	### define MRS raw file
+						set files = `echo ${base_file}${avg_string}.${rda_ext}`
+###	###
+
+						lcm_create_control_sv ${file:r} ${h2o_ref} $corraw_mode $ecc_mode ${avg_input} ${abs_raw}
+
+						lcmodel < ${study_dir}/${file:r}_indiv_${abs_raw}.control > lcmodel.log
+						
+						## covert table file to txt file with single row multiple columns							
+						lcm_table2txt_sv ${file:r}_indiv_${abs_raw} ${h2o_ref}	indiv_fit $measurement
+									
+	
+
+

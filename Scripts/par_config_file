@@ -1,0 +1,18 @@
+julio-desktop	matlab_script_path	/home/julio/Documents/MATLAB/
+bmi-OMEN-by-HP-Laptop-15-dh0xxx	matlab_script_path	/home/bmi/Documents/MATLAB/Toolbox/
+julio-desktop	get_txt_siemens_dicom	dicom2txtfile
+bmi-OMEN-by-HP-Laptop-15-dh0xxx	get_txt_siemens_dicom	dicom2txtfile
+
+global	matlab_cmd	matlab_-nosplash_-nodisplay_-nodesktop_-nojvm_-r
+global	awk_path	awk
+
+julio-desktop	awk_path	awk
+julio-desktop	data_ima_dir	/home/julio/Documents/MRS/data/dicom_ima_MRS
+bmi-OMEN-by-HP-Laptop-15-dh0xxx	data_ima_dir /home/bmi/MRS/data/dicom_ima_MRS
+julio_desktop	par_dir	/home/julio/Documents/MRS/par_files
+julio-desktop	lc_dir	/home/julio/.lcmodel
+bmi-OMEN-by-HP-Laptop-15-dh0xxx	lc_dir	/home/bmi/.lcmodel
+global	lc_key
+global	lc_owner	Laboratory_of_Brain_Machine_Interfaces_and_Neuromodulation
+
+bmi-OMEN-by-HP-Laptop-15-dh0xxx	eja_svs_press	gamma_press_te23_123mhz_493f.basis

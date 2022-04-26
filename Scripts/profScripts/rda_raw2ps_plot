@@ -1,0 +1,169 @@
+#!/bin/csh -f
+#=========
+#
+#
+#
+
+set program        = $0
+set program        = $program:t
+
+
+
+set in_file        = "${1:r}"
+set out_file       = "${2:r}"
+set rda_hdr_file   = "${1:r}.rda_hdr"
+set raw_file       = "${1:r}.raw"
+set title_file     = "${1:r}.title"
+
+set text           = "txt"
+set raw            = "raw"
+set ps_plot        = "ps_plot"
+set ps_plot_in     = "plot_in"
+set ps             = "ps"
+
+set print_plots    = "no"
+
+
+
+#@#
+##set opt_bin = "/srv/users/Ricerca/opt_bin"
+set opt_bin = "/opt/bin"
+
+set par_config_file = "${opt_bin}/par_config_file"
+set machine         = `echo $HOST | cut -d. -f1`
+set AWK             = `awk '/'${machine}'\tawk_path/ {print $3}' $par_config_file`
+
+
+set par_dir     = `awk '/global\tpar_dir/ {print $3}' $par_config_file`
+
+set lc_dir      = `awk '/global\tlc_dir/ {print $3}' $par_config_file`
+
+set dir_cur     = `pwd`
+
+set plotraw     = "${lc_dir}/bin/plotraw"
+
+set plotend  = "0.20"
+set plotst   = "4.2"
+
+
+
+if ( ! -e ${raw_file} || ! -e $rda_hdr_file ) then
+ echo ""
+ echo "Usage:   $program <rda infile> <output file>"
+ echo ""
+ echo ""
+ echo "      i.e. type: $program MrCricket outcricket"
+ echo ""
+ echo ""
+ exit
+endif
+
+echo "[${program}:] ${rda_hdr_file}"
+
+set dwelltime     = `$AWK '/DwellTime:/ { printf ("%d", $2) }' ${rda_hdr_file}`
+echo "hello"
+set dw            = `printf "%s\n" 'scale = 6; '${dwelltime}'/1000000' | bc`
+set bw            = `printf "%s\n" 'scale = 6; 1/'${dw}'' | bc`
+
+
+set pnts          = `$AWK '/VectorSize/ { printf ("%d", $2) }' ${rda_hdr_file}`
+
+
+set format        = `awk '/fmtdat/ { print $2 }' ${raw_file} | cut -d\' -f2`
+
+
+if ( -e ${title_file} ) then
+	set title         = `awk '/title/' ${title_file} | cut -d\' -f2`
+else
+	 set title = "no_title"
+endif
+
+echo ">>${title}<<"
+
+set ref_amp       = `$AWK '/TransmitRefAmplitude/ { print $2 }' ${rda_hdr_file}`
+if ( $ref_amp == "" ) set ref_amp = "ref_amp"
+set freq          = `$AWK '/MRFrequency/ { print $2 }' ${rda_hdr_file}`
+
+
+##
+## Time Domain
+##
+
+echo " "'$'"PLTRAW" > ${out_file}_time.${ps_plot_in}
+echo " TITLE='${title}'" >> ${out_file}_time.${ps_plot_in} 
+echo " NUNFIL=${pnts[1]}" >> ${out_file}_time.${ps_plot_in} 
+echo " DELTAT=${dw}" >> ${out_file}_time.${ps_plot_in} 
+echo " HZPPPM=${freq}" >> ${out_file}_time.${ps_plot_in} 
+##echo " ppmend= ${plotend}" >> ${out_file}_time.${ps_plot_in} 
+##echo " ppmst= ${plotst}" >> ${out_file}_time.${ps_plot_in} 
+echo " FILRAW='./${out_file}.${raw}'" >> ${out_file}_time.${ps_plot_in} 
+echo " FILPS='./${out_file}_time.${ps_plot}'" >> ${out_file}_time.${ps_plot_in} 
+## DEGPPM - total ppm across BW = BW/MHz freq
+##        (e.g., PPM = 2000/168.191 = 11.891)
+##    cal. deg from DT => DEG = DT/DW * 360 
+## therefore DEGPPM = DEG/PPM
+
+echo " DEGPPM=-0" >> ${out_file}_time.${ps_plot_in} 
+echo " DEGZER=-4" >> ${out_file}_time.${ps_plot_in} 
+#$$$ T > F for time domain to freq domain
+echo " PLTIME=T" >> ${out_file}_time.${ps_plot_in} 
+#$$$ same as above
+echo " PLABSV=F" >> ${out_file}_time.${ps_plot_in} 
+echo " "'$'"END" >> ${out_file}_time.${ps_plot_in} 
+
+echo "CREATING PS_PLOT[1]:   ${out_file}_time.${ps_plot_in}"
+
+${plotraw} < ${out_file}_time.${ps_plot_in}
+
+ps2pdf ${out_file}_time.${ps_plot} ${out_file}_time.pdf
+rm ${out_file}_time.${ps_plot}
+
+echo "$plotraw < ${out_file}_time.${ps_plot_in}" > ${out_file}_time.batch_plot
+
+##
+## Frequency Domain
+##
+
+echo " "'$'"PLTRAW" > ${out_file}.${ps_plot_in}
+echo " TITLE='${title}'" >> ${out_file}.${ps_plot_in} 
+echo " NUNFIL=${pnts[1]}" >> ${out_file}.${ps_plot_in} 
+echo " DELTAT=${dw}" >> ${out_file}.${ps_plot_in} 
+echo " HZPPPM=${freq}" >> ${out_file}.${ps_plot_in} 
+echo " ppmend= ${plotend}" >> ${out_file}.${ps_plot_in} 
+echo " ppmst= ${plotst}" >> ${out_file}.${ps_plot_in} 
+echo " FILRAW='./${out_file}.${raw}'" >> ${out_file}.${ps_plot_in} 
+echo " FILPS='./${out_file}.${ps_plot}'" >> ${out_file}.${ps_plot_in} 
+## DEGPPM - total ppm across BW = BW/MHz freq
+##        (e.g., PPM = 2000/168.191 = 11.891)
+##    cal. deg from DT => DEG = DT/DW * 360 
+## therefore DEGPPM = DEG/PPM
+
+echo " DEGPPM=-0" >> ${out_file}.${ps_plot_in} 
+echo " DEGZER=0" >> ${out_file}.${ps_plot_in} 
+#$$$ T > F for time domain to freq domain
+echo " PLTIME=F" >> ${out_file}.${ps_plot_in} 
+#$$$ same as above
+echo " PLABSV=F" >> ${out_file}.${ps_plot_in} 
+echo " "'$'"END" >> ${out_file}.${ps_plot_in} 
+
+echo "CREATING PS_PLOT:   ${out_file}.${ps_plot_in}"
+
+${plotraw} < ${out_file}.${ps_plot_in}
+
+ps2pdf ${out_file}.${ps_plot} ${out_file}.pdf
+rm ${out_file}.${ps_plot}
+
+echo "$plotraw < ${out_file}.${ps_plot_in}" > ${out_file}.batch_plot
+
+
+
+#echo "" 
+#echo "########### End (${program}) ##########################################"
+#echo "" 
+
+
+
+##if ( $print_plots == "yes" ) lpr_2x2_lc_plots ${out_file}.${ps_plot}
+
+
+exit

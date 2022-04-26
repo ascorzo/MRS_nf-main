@@ -1,0 +1,398 @@
+#!/bin/tcsh -f
+#
+# Usage:
+# 		cd /pfc/mrs_processing_dir/site/project/subject
+# 		lcm_create_control_sv met_file h2o_file [corraw_on | corraw_off (default)] [ecc_on  | ecc_off (default)]
+# ====================================================================================== #
+# Last Modified: 20/01/2021 Julio Rodiño 
+# Notes:
+#	1.	When specifing the h2o_file only use the name of the file not the full path.
+#		the program asumes h2o_file and met_file are in the same folder.
+#	2.	Enter the full path for met_file.
+# Global variable declarations
+
+
+set debug 			= "off"				# Toggle "on"/"off"
+set debug_count 	= 1
+
+set program					= $0:t
+set opt_bin					= "/home/bmi/Documents/MRS/Scripts/"
+set par_config_file	=	"${opt_bin}/par_config_file"
+set machine         = `echo $HOST | cut -d. -f1`
+
+
+set AWK				= `awk '/global\tawk_path/ {print $3}' $par_config_file`
+set cur_dir		= `pwd`
+set raw				= "raw"
+set corraw_suf		= "_corraw"
+
+set par         	= "par"
+set control     	= "control"
+set h2o         	= "h2o"
+set table       	= "table"
+set ps_plot     	= "ps_plot"
+set ps_plot_in  	= "plot_in"
+set ps          	= "ps"
+set rda_ext				= "[i,I,r][a,m,M,d][w,a,A]"
+
+set par_dir         = `awk '/global\tpar_dir/ {print $3}' $par_config_file`
+
+set study_dir       = `pwd | rev | $AWK -F \/ '{ print $1}' | rev`
+set studydate       = `echo $study_dir |cut -d_ -f1`
+set studytime       = `echo $study_dir |cut -d_ -f2`
+set project         = `pwd | rev | $AWK -F \/ '{ print $2}' | rev`
+set site            = `pwd | rev | $AWK -F \/ '{ print $3}' | rev`
+
+set print_indiv 	= "yes"			# Input "yes" or "no" for individual metabolite printout
+
+set lc_dir      	= `awk '/'${machine}'\tlc_dir/ {print $3}' $par_config_file`
+set lc_basis      = `awk '/global\tlc_basis/ {print $3}' $par_config_file`
+
+set lc_key      	= `awk '/global\tlc_key/ {print $3}' $par_config_file`
+
+set lc_owner    	= `awk '/global\tlc_owner/ {print $3 }' $par_config_file`
+set lc_owner    	= `echo $lc_owner | tr "_" " "`
+
+set lcmodel   		= "${lc_dir}/bin/lcmodel"
+
+set plotraw   		= "${lc_dir}/bin/plotraw"
+set dir_basis 		= "${lc_dir}/basis-sets"
+
+set in_file			= "${1:r}"
+set basename		= `basename $in_file`
+set folder			= `dirname $in_file `
+
+set raw_file		= "${1:r}.raw"
+set hdr_file		=	"${1:r}.rda_hdr"
+set wfile			= "${2:r}"
+set corraw_mode		= "${3}"
+set ecc_mode		= "${4}"
+set avg_input		= "${5}"
+set abs_raw			= "${6}"
+
+if ( $abs_raw == "" ) then
+	set abs_raw = "abs"
+	set abs_raw_string = ""
+else
+	set abs_raw_string = "_${abs_raw}"
+endif
+
+if ( $avg_input == 0 ) then
+	set out_file		= "${1:r}_indiv${abs_raw_string}"
+else
+	set out_file		= "${1:r}${abs_raw_string}"
+endif
+
+
+############checking for water file########################
+
+if ( ${in_file} == "" ) then
+	echo ""
+	echo "Usage:"
+	echo ""
+	echo "	${program} met_file h2o_file [corraw_on | corraw_off (default)] [ecc_on (default) | ecc_off]"
+	echo ""
+	echo "	Note: Please execute within subject directory"
+	echo ""
+	exit
+endif
+
+
+
+set in_file_1 = `echo $in_file | cut -d_ -f1`
+set in_file_2 = `echo $in_file | cut -d_ -f2`
+set in_file_3 = `echo $in_file | cut -d_ -f3`
+set in_file_4 = `echo $in_file | cut -d_ -f4`
+#set rda_files = `echo ${in_file_1}_${in_file_2}_${in_file_3}_${in_file_4}*.${rda_ext}`
+
+
+#if ( $#rda_files >= 1 ) then
+#	set par_file = ${par_dir}/${site}/${project}/${study_dir}/${rda_files[1]:r}.par
+#
+#else
+#	echo "NO RDA FILE (${in_file_1}_${in_file_2}_${in_file_3}_${in_file_4}*.${rda_ext})"
+#	exit
+#endif
+
+
+
+if ( -e ${folder}/${wfile}.${raw} ) then
+ 	set w_file = "yes"
+else
+ 	set w_file 		= "no"
+ 	set abs_raw 	= "raw"
+ 	set ecc_mode	= "ecc_off"
+endif
+
+
+if ( ${corraw_mode} == "corraw_on") then
+	set print_indiv = "no"
+	set out_file	= "${1:r}${corraw_suf}${abs_raw_string}"
+else
+	set print_indiv = "yes"
+endif
+
+
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug [${debug_count}]: ${program}"
+	echo "in_file 		= ${in_file}"
+	echo "out_file 		= $out_file"
+	echo "wfile				=	${wfile}"
+	echo "corraw_mode 	= ${corraw_mode}"
+	echo "ecc_mode 		= ${ecc_mode}"
+	echo "End Debug: ${program} ###"
+	echo ""
+	@ debug_count++
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+
+if ( -e ${out_file}.control ) then
+	echo "[${program}]: Output control file (${out_file}) exists and will not be re-created."
+	exit
+endif
+
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug [${debug_count}]: ${program}"
+	echo "w_file = ${w_file}"
+	echo "corraw_mode = ${corraw_mode}"
+	#echo "do_ecc = ${do_ecc}"
+	echo "out_file = ${out_file}"
+	echo "End Debug: ${program} ###"
+	echo ""
+	@ debug_count++
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+###########################################################
+
+echo "[${program}]: Getting parameters - ${in_file}"
+
+set plotend   = "0.00"
+set plotst    = "5.5"
+set ppm_range = "p"
+
+set ppmend   = "0.2"
+set ppmst    = "4.0"
+
+#####################################################################
+# checking par file (RDA file)
+#####################################################################
+
+
+
+
+set dw            	= `$AWK '/DwellTime:/ { print $2 }' ${hdr_file}`
+
+set adj_dw = `echo "scale = 5; $dw / 1000000" | bc`
+
+
+set pnts			= `$AWK '/VectorSize:/ { print $2 }' ${hdr_file}`
+set seq				= `$AWK '/SequenceName:/ { print $2 }' ${hdr_file}`
+
+set freq_mhz		= `$AWK '/MRFrequency:/ { print $2 }' ${hdr_file}`
+set te				= `$AWK '/TE:/ { print $2 }' ${hdr_file}`
+set te				= $te[1]
+set tr				= `$AWK '/TR:/ { print $2 }' ${hdr_file}`
+set tm				= `$AWK '/TM:/ { print $2 }' ${hdr_file}`
+set acq				= `$AWK '/AcquisitionNumber:/ { print $2 }' ${hdr_file}`
+set avg				= `$AWK '/NumberOfAverages:/ { print $2 }' ${hdr_file}`
+set ref_amp			= `$AWK '/TransmitRefAmplitude[1H]:/ { print $2 }' ${hdr_file}`
+
+echo "BASIS>>${seq}_${te}_${site}"
+
+set basis     		= `awk '/'$machine'\t'$seq'/ {print $3}' $par_config_file`
+if ( ${#basis} == 0 ) then
+	echo ""
+	echo "[${program} - ERROR]: No basis file found based on following match string in par_config_file."
+	echo "	${machine}	${seq}_${te}_${site}"
+	echo ""
+	exit
+endif
+
+set title 			= "(${in_file}) ${studydate}_${studytime}"
+
+set control_file 	= "${out_file}.${control}"
+
+## DEBUGGER START ########################################################################
+if ($debug == "on") then
+	echo ""
+	echo "### Start Debug [${debug_count}]: ${program}"
+	echo "control_file = $control_file"
+	echo "out_file = ${out_file}"
+	echo "End Debug: ${program} ###"
+	echo ""
+	@ debug_count++
+endif
+# exit
+## DEBUGGER END ##########################################################################
+
+
+#####################################################################
+# creating the lcmodel control file
+#####################################################################
+
+echo " "'$'"LCMODL" > ${control_file}
+echo " OWNER='${lc_owner}'" >> ${control_file}
+echo " KEY=${lc_key}" >> ${control_file}
+echo " TITLE=' ${out_file} ${title}'" >> ${control_file}
+echo " FILRAW='${raw_file}'" >> ${control_file}
+
+
+
+if ( ${w_file} == "yes" ) then
+	echo " FILH2O='${wfile}.${raw}'" >> ${control_file}
+endif
+
+
+if ( ${ecc_mode} == "ecc_on" && ${avg_input} == "mega_fit" ) then
+		set ecc_mode = "ecc_off"
+endif
+
+if (${corraw_mode} == "corraw_on") then
+	set abs_raw = "raw"
+
+	echo " fcalib=1" >> ${control_file}
+
+	echo " lps=8" >> ${control_file}
+	echo " namrel= ''" >> ${control_file}
+	echo " IPAGE2=0" >> ${control_file}
+else
+	echo " namrel='Cr+PCr'" >> ${control_file}
+	echo " IPAGE2=1" >> ${control_file}
+
+
+	#echo " desdt2=1.4" >> ${control_file}
+	#echo " deext2=1.4" >> ${control_file}
+
+	echo " LCOORD=9" >> ${control_file}
+	echo " SUBBAS=F" >> ${control_file}
+endif
+
+
+if ( $avg_input == "0" || $avg_input == "-1" ) then
+	## no averaging
+
+	echo " degppm=0.0" >> ${control_file}
+	echo " sddegp=9.0" >> ${control_file}
+
+	##echo " degzer=20.0" >> ${control_file}
+	##echo " sddegz=10.0" >> ${control_file}
+
+	## only if reference freq is way off
+	##echo " ppmshf=-0.045" >> ${control_file}
+else
+	if ( ${corraw_mode} == "corraw_on" ) then
+
+		echo " degppm=0.0" >> ${control_file}
+		echo " sddegp=9" >> ${control_file}
+
+		##echo " degzer=20.0" >> ${control_file}
+		##echo " sddegz=10.0" >> ${control_file}
+
+		## only if reference freq is way off
+		##echo " ppmshf=-0.045" >> ${control_file}
+	else
+
+		echo " degppm=0" >> ${control_file}
+		echo " sddegp=9" >> ${control_file}
+
+		echo " degzer=0" >> ${control_file}
+		echo " sddegz=2.0" >> ${control_file}
+
+	endif
+
+endif
+
+
+if ( ${abs_raw} == "abs" ) then
+	echo " DOWS=T" >> ${control_file}
+else
+	echo " DOWS=F" >> ${control_file}
+endif
+
+if ( ${ecc_mode} == "ecc_on" ) then
+	echo " DOECC=T" >> ${control_file}
+
+else
+	echo " DOECC=F" >> ${control_file}
+
+echo "####################################################"
+endif
+
+
+echo " LCSV=11" >> ${control_file}
+echo " LTABLE=7" >> ${control_file}
+echo " NUNFIL=${pnts[1]}" >> ${control_file}
+echo " DELTAT=${adj_dw}" >> ${control_file}
+echo " HZPPPM=${freq_mhz}" >> ${control_file}
+
+if ( ${avg_input} == "mega_fit" ) then
+	echo " ppmend= 0.2" >> ${control_file}
+	echo " ppmgap(1,1)= 1.95" >> ${control_file}
+	echo " ppmgap(2,1)= 1.2" >> ${control_file}
+	echo " ppmst= 4.2" >> ${control_file}
+	echo " SPTYPE= 'mega-press-3'" >> ${control_file}
+else
+	echo " ppmend= ${ppmend}" >> ${control_file}
+	echo " ppmst= ${ppmst}" >> ${control_file}
+endif
+
+
+if ( $print_indiv == "yes" ) then
+	echo " NEACH= 50" >> ${control_file}				# To print all metabolites, change NEACH to something really large (e.g. 50)
+	echo " NAMEAC(1)='Glu'" >> ${control_file}
+	echo " NAMEAC(2)='Gln'" >> ${control_file}
+	echo " NAMEAC(3)='GABA'" >> ${control_file}
+	echo " NAMEAC(4)='NAA'" >> ${control_file}
+	echo " NAMEAC(5)='Cr'" >> ${control_file}
+	echo " NAMEAC(6)='PCr'" >> ${control_file}
+	echo " NAMEAC(7)='GPC'" >> ${control_file}
+	echo " NAMEAC(8)='PCh'" >> ${control_file}
+	echo " NAMEAC(9)='Ins'" >> ${control_file}
+	echo " NAMEAC(10)='Tau'" >> ${control_file}
+	echo " NAMEAC(11)='-CrCH2'" >> ${control_file}
+endif
+
+echo " NRATIO=13" >> ${control_file}
+
+
+echo " wdline(6)=0" >> ${control_file}
+#echo " wdline(1)=0.01" >> ${control_file}
+#echo " wdline(5)=0.01" >> ${control_file}
+echo " LCORAW=10" >> ${control_file}
+
+echo " FILTAB='${out_file}.${table}'" >> ${control_file}
+echo " FILPS='${out_file}.${ps}'" >> ${control_file}
+
+echo " FILCOR='${out_file}.corraw'" >> ${control_file}
+
+echo " FILCSV='${out_file}.csv'" >> ${control_file}
+echo " FILCOO='${out_file}.coord'" >> ${control_file}
+echo " FILPRI='${out_file}.print'" >> ${control_file}
+echo " LPRINT=6" >> ${control_file}
+
+echo " FILBAS='${dir_basis}/${basis}'" >> ${control_file}
+echo " "'$'"END" >> ${control_file}
+
+echo "$lcmodel < ${control_file}" > "${out_file}.lcmodel"
+
+
+exit
+
+# ###################################################################################### #
+# Change Log: ########################################################################## #
+# ###################################################################################### #
+#
+# -------------------------------------------------------------------------------------- #
+# 2013.10.31: Added option to turn ECC on or off based on input arguments
+#
+# ###################################################################################### #

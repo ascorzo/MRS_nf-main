@@ -1,0 +1,275 @@
+#!/bin/tcsh -f
+#=========
+#
+#
+#
+
+
+set program     = $0
+set program     = $program:t
+set table       = "table"
+set cur_dir     = `pwd`
+
+set mfile        = ${1:r}
+set wfile        = ${2:r}
+
+set table_file   = ${1:r}.table
+set print_file   = ${1:r}.print
+
+
+set opt_bin			= "/opt/bin"
+set par_config_file = "${opt_bin}/par_config_file"
+set machine         = `echo $HOST | cut -d. -f1`
+set AWK             = `awk '/'${machine}'\tawk_path/ {print $3}' $par_config_file`
+
+## must be inside subject directory
+
+set cur_dir         = `pwd`
+set mrs_dir         = `$AWK '/global\tdata_rda_dir/ {print $3}' $par_config_file`
+set par_dir         = `awk '/global\tpar_dir/ {print $3}' $par_config_file`
+
+set study_dir       = `pwd | rev | $AWK -F \/ '{ print $1}' | rev`
+set studydate       = `echo $study_dir |cut -d_ -f1`
+set studytime       = `echo $study_dir |cut -d_ -f2`   
+
+set project         = `pwd | rev | $AWK -F \/ '{ print $2}' | rev`
+set site            = `pwd | rev | $AWK -F \/ '{ print $3}' | rev`
+
+set mfile_base 		= `echo $mfile | cut -d_ -f1`
+set mfile_reg 		= `echo $mfile | cut -d_ -f2`
+set mfile_side 		= `echo $mfile | cut -d_ -f3`
+set mfile_series 	= `echo $mfile | cut -d_ -f4`
+set par_name		= "${mfile_base}_${mfile_reg}_${mfile_side}_${mfile_series}"
+
+
+
+
+if ( $wfile == "" ) set wfile = "no_h2o_ref"
+
+set mfile_suf = `echo ${mfile:r} | rev | cut -d_ -f1 | rev`
+
+set avg_fit = $3
+set fit_range = $4	
+
+if ( $avg_fit == "" ) set avg_fit = "unknown_fit"
+if ( $fit_range == "" ) set fit_range = "unknown_fit_range"
+ 
+
+if ( "${mfile_suf}" == "corraw" ) then
+	set mfile_root = `echo ${mfile:r} | rev | cut -d_ -f1 --complement | rev`
+else
+	set mfile_root = `echo ${mfile:r}`
+endif
+
+if ( -e  ${par_dir}/${site}/${project}/${study_dir}/${par_name}.par ) then
+	set par_file = `echo ${par_dir}/${site}/${project}/${study_dir}/${par_name}.par`
+else
+	set par_file = `echo ${par_dir}/${site}/${project}/${study_dir}/${par_name}1.par`
+endif
+	
+set title = `awk '/title_table: /' ${par_file} | cut -f2`  
+
+
+
+set proc_date = `date +%m/%d/%Y`
+
+echo "$table_file"
+
+set snr      = `awk '/S\/N = / {print $7}' $table_file`
+set fwhm     = `awk '/FWHM = / {print $3}' $table_file`
+set deg0     = `awk '/Ph:/' $table_file | cut -d: -f2 | cut -dd -f1 | tr -d " "`
+set deg1     = `awk '/Ph:/' $table_file | cut -dg -f2 | cut -dd -f1 | tr -d " "`
+set data_shift = `awk '/Data shift =/' $table_file | sed 's/-/ -/' | cut -d\  -f6`
+if (data_shift == "" ) set data_shift = "999"
+
+
+set dows    = `awk '/DOWS/ {print $3}' ${table_file}`
+if ( $#dows == 0 ) set dows    = `awk '/DOWS=/ {print $2}' ${table_file}`
+if ( $#dows == 0 ) set dows    = `awk '/DOWS=/' ${table_file}| cut -d= -f2`
+if ( $#dows == 0 ) set dows = "F"
+
+if ( -e $print_file & $dows == "T" ) then
+  set fcalib = `awk '/FCALIB/ {print $3}' ${print_file} | tail -1` 
+else
+  set fcalib   = `awk '/fcalib/ {print $1}' $table_file | cut -d= -f2`
+endif
+if ( $fcalib == "" ) set fcalib = "fcalib"
+
+
+set lc_version = `awk '/LCModel \(Version/ {print $3}' $table_file | cut -d\) -f1`
+ 
+set ppmend   = `awk '/ppmend/ {print $2}' $table_file`
+set ppmst    = `awk '/ppmst/ {print $2}' $table_file`
+
+
+set doecc    = `awk '/DOECC/ {print $3}' ${table_file}`
+if ( $#doecc == 0 ) set doecc    = `awk '/DOECC=/ {print $2}' ${table_file}`
+if ( $#doecc == 0 ) set doecc    = `awk '/DOECC=/' ${table_file}| cut -d= -f2`
+if ( $#doecc == 0 ) set doecc = "F"
+
+set out_table_file = "${table_file:r}.lc_out"
+
+set basis = `awk '/basis/ {print $1$2}' $table_file | tr -d "'" | tr -d "\012" | cut -d= -f2`
+set basis = $basis:t:r
+
+
+#all-metabolites
+#set metabolites = "Ala Asp Cr Cre GABA Glc Gln Glu GPC Glyc Gly PCh Ins mI Lac NAA NAAG Scyllo Tau Acn Act Bet bHb Car Cho Cit Cys Eth Fuc Gcn Gcr GSH Gua ILc Leu PAl PE Pgc Pyr Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+
+#original
+#set metabolites = "Act Ala Asp Cre GABA Glc Gln Glu GPC Gly PC myo Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PAl PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+
+#echo $basis
+
+switch ( $basis )
+  case "sv4T_se22_051215"
+    #added Prop - propofol to basis set - replaces the PAL metabolite - 4/24/06
+    set metabolites = "Act Ala Asp Cre GABA Glc Gln Glu GPC Gly PC myo Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua Prop PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te22_168mhz_074"
+    #added new labels that are part of the enew simulated basis set - 2/23/07
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te22_168mhz_506g"
+    #added new labels that are part of the enew simulated basis set - 2/23/07
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te80_64mhz_331c"
+    #added new labels that are part of the enew simulated basis set - 2/23/07
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "press_te30_3t_01a"
+    set metabolites = "Act Ala Asp Cre GABA Glc Gln Glu GPC Gly PCh mI Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te23_123mhz_388a"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te20_123mhz_650d"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te23_123mhz_493f"
+## changed Cre to Cr (03/04/2016)
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case  "gamma_press_te80_123mhz_457f"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case	"gamma_te0_300mhz_326a"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case  "gamma_press_te21_123mhz_647d"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+    breaksw
+  case	"gamma_press_te14_300mhz_476f"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"gamma_te0_300mhz_326a_phantom"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"gamma_te0_500mhz_477f"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Glyc PCh Ins Lac NAA NAAG Bet Tau Car Cho Cit Eth GSH 2HG PCr PE Suc Thr Pgc TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"combined_12t"
+    set metabolites = "Act Ala Asp Cre1 GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Bet Eth GSH Gua PCr PEA Suc Pyr Pgc Ins+Gly Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"gamma_press_te80_123mhz_103"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"gamma_press_te30_128mhz_213"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"3t_IU_MP_te68_diff_yesNAAG_noLac_Kaiser"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+  case	"3t_IU_MP_te68_diff_yesNAAG_noLac_c"
+    set metabolites = "Act Ala Asp Cr GABA Glc Gln Glu GPC Gly PCh Ins Lac NAA NAAG Scyllo Tau Car Cho Cit Eth GSH Gua PCr PE Suc Thr Val TMPO Lipid1 Lip13a Lip13b Lip13c Lip13d Lip13e Lip09 MM09 Lip20 MM20 MM12 MM14 MM17 \-CrCH2 GPC\+PCh GPC\+Cho PCh\+Cho Cho\+GPC\+PCh NAA\+NAAG Ins\+Glyc mI\+Glyc Ins\+Gly mI\+Gly Cr\+PCr Cre\+PCr Glu\+Gln Lip13a\+Lip13b MM14\+Lip13a\+Lip13b\+MM12 MM09\+Lip09 MM20\+Lip20"
+	breaksw  
+	
+  default
+ 	set metabolites = ""
+  breaksw	
+endsw
+
+
+
+if ( "$metabolites" == "" ) then
+	echo "## "
+	echo "## NO MATCH METABOLITE LIST: $basis"
+	echo "##"
+	echo "## Please, modify the case statement in $program" 
+	exit
+endif
+
+##echo -n "${mfile:r} ${mfile:r}.par $table_file ${wfile} $proc_date ${ppmst}_${ppmend} $lc_version $deg0 $deg1 $snr $fwhm $data_shift $fcalib $doecc $dows $basis " > $out_table_file
+
+echo -n "$title ${mfile:r}.par $table_file ${wfile} $proc_date ${ppmst}_${ppmend} $lc_version $deg0 $deg1 $snr $fwhm $data_shift $fcalib $doecc $dows $basis " > $out_table_file
+awk '/CONC/,/MISC/' $table_file > tmp
+
+
+
+foreach metabolite ($metabolites)
+
+
+
+ set get_sign = `awk '/ '${metabolite}'\ / {print $3}' tmp | wc -c`
+
+ if ( $metabolite == "\-CrCH2" && $get_sign == 6 ) then
+   set sign = "-"
+ else
+  set sign = ""
+ endif
+
+ switch ( $get_sign )
+ case 6:
+   set met = `awk '/ '${metabolite}' / {print $1}' tmp`
+   set met_sd = `awk '/ '${metabolite}' / {print $2}' tmp | cut -d% -f1`
+ breaksw
+ case 0:
+   set met = `awk '/ '${metabolite}' / {print $1}' tmp`
+   set met_sd = `awk '/ '${metabolite}' / {print $2}' tmp | cut -d% -f1`
+ breaksw
+ case 13:
+   set met = `awk '/\+'${metabolite}' / {print $1}' tmp`
+   set met_sd = `awk '/\+'${metabolite}' / {print $2}' tmp | cut -d% -f1`
+ breaksw
+ default:
+   set met = `awk '/ '${metabolite}' / {print $1}' tmp`
+   set met_sd = `awk '/ '${metabolite}' / {print $2}' tmp | cut -d% -f1`
+ breaksw
+ endsw
+
+ if ( $#met == 0 && $#met_sd == 0 ) then
+   set met = "0.000"
+   set met_sd = "0.000"
+ else
+   echo "\t${metabolite}:\t${sign}${met}"
+ endif
+
+
+ echo "${sign}${met}\t${met_sd}\t\c" >> $out_table_file
+
+end
+
+rm -r tmp
+
+echo "##"
+echo "## ${program}:  Done ... "
+echo "##"
+
+echo " " >> $out_table_file 
+
+sed 's/dummy2/'${avg_fit}'/' $out_table_file | sed 's/dummy3/'${fit_range}'/' > tmp.lc_out
+cat tmp.lc_out > $out_table_file
+rm -f tmp.lc_out
+
+
+tabit $out_table_file
+
+#set project   =  `echo $basename | cut -c1,2`
+#set day = `date | awk '{printf $3$2$6}'`
+
+#cat ${out_table_file} >> ${lc_out_dir}/${project}${seq_type}${fit_suffix}_${day}.txt
+
+
+
+exit
